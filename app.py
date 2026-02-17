@@ -99,9 +99,14 @@ with col_barra:
                 for m, vals in st.session_state.mixto_widgets.items():
                     fila[f"{m}_Area"] = vals["area"]
                     fila[f"{m}_Perim"] = vals["peri"]
+                    fila[f"{m}_Vol%"] = vals["area"]  # % volumen ≈ área
 
-                fila[f"{ultimo}_Area"] = 100 - total_area
-                fila[f"{ultimo}_Perim"] = 100 - total_peri
+                restante_area = 100 - total_area
+                restante_peri = 100 - total_peri
+
+                fila[f"{ultimo}_Area"] = restante_area
+                fila[f"{ultimo}_Perim"] = restante_peri
+                fila[f"{ultimo}_Vol%"] = restante_area  # % volumen ≈ área
 
                 st.session_state.registro_mixtos = pd.concat(
                     [st.session_state.registro_mixtos, pd.DataFrame([fila])],
