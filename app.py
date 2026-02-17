@@ -1,146 +1,154 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="Registro de Partículas", layout="wide")
+# -----------------------------
+# Estado inicial
+# -----------------------------
+if "registro_libres" not in st.session_state:
+    st.session_state.registro_libres = pd.DataFrame(columns=["Campo", "Mineral", "Cantidad"])
 
-# =========================
-# Inicialización de sesión
-# =========================
-if "libres" not in st.session_state:
-    st.session_state.libres = []
+if "registro_mixtos" not in st.session_state:
+    st.session_state.registro_mixtos = pd.DataFrame()
 
-if "mixtos" not in st.session_state:
-    st.session_state.mixtos = []
+if "campo_actual" not in st.session_state:
+    st.session_state.campo_actual = 1
 
-if "contador_mixtos" not in st.session_state:
-    st.session_state.contador_mixtos = {}
+if "mixto_widgets" not in st.session_state:
+    st.session_state.mixto_widgets = {}
 
-# =========================
-# Título
-# =========================
-st.title("📋 Registro de Partículas")
+# -----------------------------
+# Layout principal
+# -----------------------------
+st.set_page_config(layout="wide")
+
+col_barra, col_tabla = st.columns([1, 2])
 
 # =====================================================
-# REGISTRO — LIBRES
+# BARRA LATERAL — REGISTRO
 # =====================================================
-st.header("➕ Registrar Partículas Libres")
+with col_barra:
+    st.header("Registro")
 
-col1, col2 = st.columns(2)
+    # ---------- LIBRES ----------
+    st.subheader("Partículas libres")
 
-with col1:
     mineral = st.text_input("Mineral")
-
-with col2:
     cantidad = st.number_input("Cantidad", min_value=0, step=1)
 
-if st.button("Guardar libre"):
+    if st.button("Agregar libre"):
+        if mineral and cantidad > 0:
+            nueva = pd.DataFrame([{
+                "Campo": st.session_state.campo_actual,
+                "Mineral": mineral.capitalize(),
+                "Cantidad": cantidad
+            }])
 
-    if mineral and cantidad > 0:
-        st.session_state.libres.append({
-            "Mineral": mineral,
-            "Cantidad": cantidad
-        })
-        st.success("Libre guardado")
+            st.session_state.registro_libres = pd.concat(
+                [st.session_state.registro_libres, nueva],
+                ignore_index=True
+            )
 
-# Mostrar libres
-st.subheader("🔹 Libres")
+            st.session_state.campo_actual += 1
+            st.success("Libre agregado")
+        else:
+            st.warning("Datos inválidos")
 
-if st.session_state.libres:
-    df_libres = pd.DataFrame(st.session_state.libres)
-    st.dataframe(df_libres, use_container_width=True)
-else:
-    st.info("No hay partículas libres")
+    st.divider()
 
-# =====================================================
-# REGISTRO — MIXTOS
-# =====================================================
-st.header("➕ Registrar Partículas Mixtas")
+    # ---------- MIXTOS ----------
+    st.subheader("Partículas mixtas")
 
-combo = st.text_input("Combinación (ej: py/ef/ggs)")
+    combinacion = st.text_input("Combinación (ej: ef/py)")
 
-if combo:
+    if st.button("Generar campos"):
+        if "/" in combinacion:
+            minerales = [m.strip() for m in combinacion.lower().split("/")]
+            st.session_state.mixto_widgets = {
+                m: {"area": 0.0, "peri": 0.0}
+                for m in minerales[:-1]
+            }
+        else:
+            st.warning("Formato inválido")
 
-    minerales = combo.split("/")
+    # Inputs dinámicos
+    total_area = 0
+    total_peri = 0
 
-    st.write("Ingrese área y perímetro:")
+    for m in st.session_state.mixto_widgets:
+        a = st.number_input(f"{m} Area", 0.0, 100.0, key=f"a_{m}")
+        p = st.number_input(f"{m} Perímetro", 0.0, 100.0, key=f"p_{m}")
 
-    datos = {}
+        st.session_state.mixto_widgets[m]["area"] = a
+        st.session_state.mixto_widgets[m]["peri"] = p
 
-    for m in minerales:
-        colA, colP = st.columns(2)
-
-        with colA:
-            area = st.number_input(f"{m} Área", key=f"{m}_area")
-
-        with colP:
-            perim = st.number_input(f"{m} Perímetro", key=f"{m}_perim")
-
-        datos[m] = {
-            "Area": area,
-            "Perimetro": perim
-        }
+        total_area += a
+        total_peri += p
 
     if st.button("Guardar mixto"):
+        if combinacion and st.session_state.mixto_widgets:
+            minerales = combinacion.lower().split("/")
+            ultimo = minerales[-1]
 
-        fila = {"Combinación": combo}
+            if total_area <= 100 and total_peri <= 100:
+                fila = {
+                    "Campo": st.session_state.campo_actual,
+                    "Cantidad": 1,
+                    "Combinación": combinacion.lower()
+                }
 
-        for m in datos:
-            fila[f"{m}_Area"] = datos[m]["Area"]
-            fila[f"{m}_Perim"] = datos[m]["Perimetro"]
+                for m, vals in st.session_state.mixto_widgets.items():
+                    fila[f"{m}_Area"] = vals["area"]
+                    fila[f"{m}_Perim"] = vals["peri"]
 
-        st.session_state.mixtos.append(fila)
+                fila[f"{ultimo}_Area"] = 100 - total_area
+                fila[f"{ultimo}_Perim"] = 100 - total_peri
 
-        # contador
-        st.session_state.contador_mixtos[combo] = (
-            st.session_state.contador_mixtos.get(combo, 0) + 1
-        )
+                st.session_state.registro_mixtos = pd.concat(
+                    [st.session_state.registro_mixtos, pd.DataFrame([fila])],
+                    ignore_index=True
+                )
 
-        st.success("Mixto guardado")
+                st.session_state.campo_actual += 1
+                st.session_state.mixto_widgets = {}
 
-# =====================================================
-# MOSTRAR MIXTOS — SEPARADOS
-# =====================================================
-st.header("🔸 Mixtos")
-
-if st.session_state.mixtos:
-
-    df = pd.DataFrame(st.session_state.mixtos)
-
-    for combinacion in df["Combinación"].unique():
-
-        st.subheader(f"Combinación: {combinacion}")
-
-        df_filtrado = df[df["Combinación"] == combinacion]
-
-        st.dataframe(df_filtrado, use_container_width=True)
-
-else:
-    st.info("No hay partículas mixtas")
+                st.success("Mixto guardado")
+            else:
+                st.error("Totales exceden 100%")
+        else:
+            st.warning("Primero genere los campos")
 
 # =====================================================
-# CONTEO MIXTOS
+# PANEL GRANDE — TABLAS
 # =====================================================
-st.header("📊 Conteo de Mixtos")
+with col_tabla:
+    st.header("Resumen")
 
-if st.session_state.contador_mixtos:
+    # ---------- LIBRES ----------
+    st.subheader("Libres")
 
-    df_count = pd.DataFrame([
-        {"Combinación": k, "Cantidad": v}
-        for k, v in st.session_state.contador_mixtos.items()
-    ])
+    df_lib = st.session_state.registro_libres
 
-    st.dataframe(df_count, use_container_width=True)
+    if not df_lib.empty:
+        total = df_lib["Cantidad"].sum()
+        total_row = pd.DataFrame([{
+            "Campo": "TOTAL",
+            "Mineral": "",
+            "Cantidad": total
+        }])
 
-else:
-    st.info("Sin conteo aún")
+        st.dataframe(pd.concat([df_lib, total_row], ignore_index=True))
+    else:
+        st.info("No hay libres")
 
-# =====================================================
-# LIMPIAR DATOS
-# =====================================================
-st.header("⚙ Opciones")
+    # ---------- MIXTOS ----------
+    st.subheader("Mixtos")
 
-if st.button("Reiniciar todo"):
-    st.session_state.libres = []
-    st.session_state.mixtos = []
-    st.session_state.contador_mixtos = {}
-    st.success("Datos reiniciados")
+    df_mix = st.session_state.registro_mixtos
+
+    if not df_mix.empty:
+        total_mix = len(df_mix)
+        total_row = pd.DataFrame([{"Campo": "TOTAL", "Cantidad": total_mix}])
+
+        st.dataframe(pd.concat([df_mix, total_row], ignore_index=True))
+    else:
+        st.info("No hay mixtos")
