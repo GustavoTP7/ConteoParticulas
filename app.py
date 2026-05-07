@@ -1,87 +1,88 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="Cánepa - Lógica Exacta", layout="wide")
+st.set_page_config(page_title="Método Cánepa - Automatizado", layout="wide")
 
+# --- PERSISTENCIA DE DATOS ---
 if 'db' not in st.session_state:
-    st.session_state.db = pd.DataFrame(columns=[
-        'Campo', 'Combinación', 'Fase', 'Area', 'Perim', 'SxD', 'Vol_Mezcla'
-    ])
+    st.session_state.db = pd.DataFrame(columns=['Campo', 'Mezcla', 'Fase', 'Area', 'Perim', 'SxD'])
 
-# --- SIDEBAR: INGRESO ---
+# --- SIDEBAR: REGISTRO RÁPIDO ---
 with st.sidebar:
-    st.title("📥 Registro")
-    campo = st.number_input("Campo", min_value=1, step=1)
-    combo = st.text_input("Mezcla (ej: GGs/ef)").lower()
-    vol_m = st.number_input("% Vol de la Mezcla", min_value=0.0, format="%.2f")
+    st.title("📥 Registro Manual")
+    campo = st.number_input("Partícula #", min_value=1, step=1)
+    mezcla = st.text_input("Mezcla (Ej: GGs/ef)").lower()
     
-    if combo and '/' in combo:
-        minerales = combo.split('/')
-        with st.form("form_p"):
-            m1 = minerales[0]
-            st.markdown(f"**Mineral A: {m1}**")
-            a1 = st.number_input(f"Área {m1}", min_value=0.0)
-            p1 = st.number_input(f"Perímetro {m1}", min_value=0.0)
+    # Factor de Volumen (El 1.44 de tu hoja)
+    factor_vol = st.number_input("Factor % Vol (Ratio)", value=1.44, format="%.2f")
+    
+    if mezcla and '/' in mezcla:
+        fases = mezcla.split('/')
+        with st.form("form_registro"):
+            f1 = fases[0]
+            st.markdown(f"**Fase A: {f1}**")
+            a1 = st.number_input(f"Área {f1}", min_value=0.0)
+            p1 = st.number_input(f"Perímetro {f1}", min_value=0.0)
             
-            # El mineral B es el complemento (Lógica de tu nota)
-            m2 = minerales[1]
+            # Complemento automático (Lógica Cánepa)
+            f2 = fases[1]
             a2 = 100.0 - a1
             p2 = 100.0 - p1
             
-            if st.form_submit_button("Registrar"):
-                # Guardamos ambos minerales de la partícula
-                rows = [
-                    {'Campo': campo, 'Combinación': combo, 'Fase': m1.upper(), 'Area': a1, 'Perim': p1, 'SxD': a1*p1, 'Vol_Mezcla': vol_m},
-                    {'Campo': campo, 'Combinación': combo, 'Fase': m2.upper(), 'Area': a2, 'Perim': p2, 'SxD': a2*p2, 'Vol_Mezcla': vol_m}
+            if st.form_submit_button("💾 Guardar Partícula"):
+                nuevos_datos = [
+                    {'Campo': campo, 'Mezcla': mezcla, 'Fase': f1.upper(), 'Area': a1, 'Perim': p1, 'SxD': a1*p1},
+                    {'Campo': campo, 'Mezcla': mezcla, 'Fase': f2.upper(), 'Area': a2, 'Perim': p2, 'SxD': a2*p2}
                 ]
-                st.session_state.db = pd.concat([st.session_state.db, pd.DataFrame(rows)], ignore_index=True)
-                st.toast("Guardado")
+                st.session_state.db = pd.concat([st.session_state.db, pd.DataFrame(nuevos_datos)], ignore_index=True)
+                st.toast("Registrado")
 
-# --- PRINCIPAL: CÁLCULOS PASO A PASO ---
-st.title("📊 Reporte con Lógica de Nota Manuscrita")
+    if st.button("🗑️ Limpiar Base de Datos"):
+        st.session_state.db = pd.DataFrame(columns=['Campo', 'Mezcla', 'Fase', 'Area', 'Perim', 'SxD'])
+        st.rerun()
 
-if not st.session_state.db.empty:
-    df = st.session_state.db
-    
-    # 1. Agrupamos por Mezcla para los cálculos finales
-    for cb in df['Combinación'].unique():
-        st.subheader(f"Análisis Mezcla: {cb}")
-        df_cb = df[df['Combinación'] == cb]
+# --- ÁREA PRINCIPAL: CÁLCULOS SEGÚN TU HOJA ---
+st.title("📊 Reporte de Resultados - Lógica Cánepa")
+
+if st.session_state.db.empty:
+    st.info("Ingresa datos en el panel izquierdo.")
+else:
+    for m_id in st.session_state.db['Mezcla'].unique():
+        st.header(f"Mezcla: {m_id.upper()}")
+        df_m = st.session_state.db[st.session_state.db['Mezcla'] == m_id]
         
-        # Paso A: Sumar Áreas totales (Ej: 140 + 460 = 600)
-        area_total_mezcla = df_cb['Area'].sum()
+        # 1. Suma de todas las áreas (Paso 1 de tu hoja: 140 + 460 = 600)
+        area_total_sistema = df_m['Area'].sum()
         
-        resumen_final = []
-        for m in cb.split('/'):
-            fase = m.upper()
-            datos_fase = df_cb[df_cb['Fase'] == fase]
+        resumen_calculado = []
+        for fase_nom in m_id.split('/'):
+            fase_up = fase_nom.upper()
+            df_fase = df_m[df_m['Fase'] == fase_up]
             
-            suma_area = datos_fase['Area'].sum()
-            suma_sxd = datos_fase['SxD'].sum()
-            vol_mezcla = datos_fase['Vol_Mezcla'].iloc[0]
+            s_area = df_fase['Area'].sum()
+            s_sxd = df_fase['SxD'].sum()
             
-            # Paso B: % de participación (Ej: 140 -> 23.3%)
-            porcentaje_participacion = (suma_area / area_total_mezcla) if area_total_mezcla > 0 else 0
+            # 2. Porcentaje de Área (Paso 2: 140 -> 23.3%)
+            p_area = (s_area / area_total_sistema) if area_total_sistema > 0 else 0
             
-            # Paso C: % Volumen real (Ej: 23.3% de 1.44 = 0.336)
-            vol_real = porcentaje_participacion * vol_mezcla
+            # 3. % Volumen (Paso 3: 23.3% * 1.44 = 0.336)
+            p_vol = p_area * factor_vol
             
-            # Paso D: G.L (Suma SxD / Suma Áreas totales de la mezcla)
-            # Nota: Según tu foto, divides entre el total acumulado (600 en tu ejemplo)
-            gl = suma_sxd / area_total_mezcla if area_total_mezcla > 0 else 0
+            # 4. G.L Final (Suma SxD / Area Total Sistema)
+            gl_final = s_sxd / area_total_sistema if area_total_sistema > 0 else 0
             
-            resumen_final.append({
-                'Mineral': fase,
-                'Suma Area': suma_area,
-                '% Partic.': f"{porcentaje_participacion*100:.1f}%",
-                '% Vol Real': round(vol_real, 3),
-                'Suma SxD': suma_sxd,
-                'G.L. Final': round(gl, 2)
+            resumen_calculado.append({
+                'Especie': fase_up,
+                'Suma Áreas': s_area,
+                '% Área Rel.': f"{p_area*100:.1f}%",
+                '% Vol Calc': round(p_vol, 3),
+                'Suma SxD': s_sxd,
+                'G.L. (SxD/SumArea)': round(gl_final, 2)
             })
             
-        st.table(pd.DataFrame(resumen_final))
-        st.caption(f"Suma total de áreas en esta mezcla: {area_total_mezcla}")
-    
-    st.divider()
-    st.subheader("Historial Completo")
-    st.dataframe(df)
+        st.table(pd.DataFrame(resumen_calculado))
+        st.write(f"**Suma Total de Áreas de la Mezcla:** {area_total_sistema}")
+        st.divider()
+
+    st.subheader("Historial de Partículas")
+    st.dataframe(st.session_state.db)
