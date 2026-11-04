@@ -1,88 +1,92 @@
-import streamlit as st
-import pandas as pd
+"""Centro de Inteligencia Metalúrgica — prototipo.
+Ejecutar:  streamlit run app.py
+"""
+import streamlit as st, pandas as pd, tempfile, os
+from importer import leer_hoja
+from engine import calcular
+import db, report
 
-st.set_page_config(page_title="Método Cánepa - Automatizado", layout="wide")
+st.set_page_config(page_title="Inteligencia Metalúrgica", layout="wide")
+st.title("🔬 Centro de Inteligencia Metalúrgica")
+st.caption("Prototipo — motor validado 1:1 contra el Excel original")
 
-# --- PERSISTENCIA DE DATOS ---
-if 'db' not in st.session_state:
-    st.session_state.db = pd.DataFrame(columns=['Campo', 'Mezcla', 'Fase', 'Area', 'Perim', 'SxD'])
+con = db.conectar()
 
-# --- SIDEBAR: REGISTRO RÁPIDO ---
 with st.sidebar:
-    st.title("📥 Registro Manual")
-    campo = st.number_input("Partícula #", min_value=1, step=1)
-    mezcla = st.text_input("Mezcla (Ej: GGs/ef)").lower()
-    
-    # Factor de Volumen (El 1.44 de tu hoja)
-    factor_vol = st.number_input("Factor % Vol (Ratio)", value=1.44, format="%.2f")
-    
-    if mezcla and '/' in mezcla:
-        fases = mezcla.split('/')
-        with st.form("form_registro"):
-            f1 = fases[0]
-            st.markdown(f"**Fase A: {f1}**")
-            a1 = st.number_input(f"Área {f1}", min_value=0.0)
-            p1 = st.number_input(f"Perímetro {f1}", min_value=0.0)
-            
-            # Complemento automático (Lógica Cánepa)
-            f2 = fases[1]
-            a2 = 100.0 - a1
-            p2 = 100.0 - p1
-            
-            if st.form_submit_button("💾 Guardar Partícula"):
-                nuevos_datos = [
-                    {'Campo': campo, 'Mezcla': mezcla, 'Fase': f1.upper(), 'Area': a1, 'Perim': p1, 'SxD': a1*p1},
-                    {'Campo': campo, 'Mezcla': mezcla, 'Fase': f2.upper(), 'Area': a2, 'Perim': p2, 'SxD': a2*p2}
-                ]
-                st.session_state.db = pd.concat([st.session_state.db, pd.DataFrame(nuevos_datos)], ignore_index=True)
-                st.toast("Registrado")
+    st.header("Datos")
+    modo = st.radio("Origen", ["Importar Excel", "Abrir muestra guardada"])
+    data = None; nombre = None
+    if modo == "Importar Excel":
+        up = st.file_uploader("Archivo .xlsm", type=["xlsm","xlsx"])
+        if up:
+            tmp = os.path.join(tempfile.gettempdir(), up.name)
+            with open(tmp,"wb") as f: f.write(up.getbuffer())
+            import openpyxl
+            hojas = openpyxl.load_workbook(tmp, read_only=True).sheetnames
+            hoja = st.selectbox("Hoja de registro", hojas)
+            if st.button("Cargar y calcular", type="primary"):
+                data = leer_hoja(tmp, hoja); nombre = f"{up.name} · {hoja}"
+                st.session_state["data"] = data
+                st.session_state["nombre"] = nombre
+                if st.toggle("Guardar en la base de datos", value=True):
+                    db.guardar_muestra(con, data, nombre, hoja)
+                    st.success("Guardada en la base de datos")
+    else:
+        filas = db.listar(con)
+        if filas:
+            opt = {f"#{i} · {n} ({f})": i for i,n,h,tc,f in filas}
+            sel = st.selectbox("Muestra", list(opt))
+            if st.button("Abrir", type="primary"):
+                data = db.cargar_muestra(con, opt[sel])
+                st.session_state["data"] = data
+                st.session_state["nombre"] = sel
+        else:
+            st.info("Aún no hay muestras guardadas.")
 
-    if st.button("🗑️ Limpiar Base de Datos"):
-        st.session_state.db = pd.DataFrame(columns=['Campo', 'Mezcla', 'Fase', 'Area', 'Perim', 'SxD'])
-        st.rerun()
+data = st.session_state.get("data")
+nombre = st.session_state.get("nombre","")
 
-# --- ÁREA PRINCIPAL: CÁLCULOS SEGÚN TU HOJA ---
-st.title("📊 Reporte de Resultados - Lógica Cánepa")
+if not data:
+    st.info("← Importa un Excel o abre una muestra para empezar.")
+    st.stop()
 
-if st.session_state.db.empty:
-    st.info("Ingresa datos en el panel izquierdo.")
-else:
-    for m_id in st.session_state.db['Mezcla'].unique():
-        st.header(f"Mezcla: {m_id.upper()}")
-        df_m = st.session_state.db[st.session_state.db['Mezcla'] == m_id]
-        
-        # 1. Suma de todas las áreas (Paso 1 de tu hoja: 140 + 460 = 600)
-        area_total_sistema = df_m['Area'].sum()
-        
-        resumen_calculado = []
-        for fase_nom in m_id.split('/'):
-            fase_up = fase_nom.upper()
-            df_fase = df_m[df_m['Fase'] == fase_up]
-            
-            s_area = df_fase['Area'].sum()
-            s_sxd = df_fase['SxD'].sum()
-            
-            # 2. Porcentaje de Área (Paso 2: 140 -> 23.3%)
-            p_area = (s_area / area_total_sistema) if area_total_sistema > 0 else 0
-            
-            # 3. % Volumen (Paso 3: 23.3% * 1.44 = 0.336)
-            p_vol = p_area * factor_vol
-            
-            # 4. G.L Final (Suma SxD / Area Total Sistema)
-            gl_final = s_sxd / area_total_sistema if area_total_sistema > 0 else 0
-            
-            resumen_calculado.append({
-                'Especie': fase_up,
-                'Suma Áreas': s_area,
-                '% Área Rel.': f"{p_area*100:.1f}%",
-                '% Vol Calc': round(p_vol, 3),
-                'Suma SxD': s_sxd,
-                'G.L. (SxD/SumArea)': round(gl_final, 2)
-            })
-            
-        st.table(pd.DataFrame(resumen_calculado))
-        st.write(f"**Suma Total de Áreas de la Mezcla:** {area_total_sistema}")
-        st.divider()
+res = calcular(data)
+rdf = report.resumen_df(res)
+adf = report.asociaciones_df(res)
 
-    st.subheader("Historial de Partículas")
-    st.dataframe(st.session_state.db)
+st.subheader(nombre)
+c1,c2,c3 = st.columns(3)
+c1.metric("Total de conteos (C)", f"{data['totalC']:.0f}")
+c2.metric("Minerales", len(res))
+c3.metric("Asociaciones", len(adf))
+
+t1,t2,t3,t4 = st.tabs(["📊 Resumen","🔗 Asociaciones","📈 Gráficos","✔️ Validación"])
+
+with t1:
+    st.dataframe(rdf, use_container_width=True, hide_index=True)
+with t2:
+    st.dataframe(adf, use_container_width=True, hide_index=True)
+with t3:
+    st.markdown("**% Liberado por mineral**")
+    st.bar_chart(rdf.set_index("Mineral")["% Libre"])
+    st.markdown("**Grado de liberación (GL) por asociación**")
+    if not adf.empty:
+        st.bar_chart(adf.assign(etq=adf["Mineral"]+" · "+adf["Asociacion"]).set_index("etq")["GL"])
+with t4:
+    if data.get("ws") is not None:
+        from validate import cerca
+        ws = data["ws"]; rows=[]; ok=0; tot=0
+        gv=lambda r,c:(lambda x: float(x) if isinstance(x,(int,float)) else None)(ws.cell(r,c).value)
+        for mineral,b in data["bloques"].items():
+            col=b["col"]; r=res[mineral]
+            pares=[("% libre",r["pct_libre"],gv(156,col+3)),
+                   ("GL 1ª asoc",(r["asociaciones"][0]["GL"] if r["asociaciones"] else 0),gv(156,col+8))]
+            for nm,py,xl in pares:
+                tot+=1; good=cerca(py,xl); ok+=good
+                rows.append(dict(Mineral=mineral,Campo=nm,Python=round(py,3),
+                                 Excel=(round(xl,3) if xl is not None else None),
+                                 OK=("✅" if good else "❌")))
+        st.write(f"**{ok}/{tot} valores coinciden con el Excel original**")
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("La validación contra Excel solo aplica al importar (no al abrir desde la BD).")
